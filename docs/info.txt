@@ -20,11 +20,3 @@ ios-connect/
 │
 └── main.py                      # Entry point
 
-
-cd ios-connect
-git init
-git add .
-git commit -m "Initial project structure with device detection"
-git branch -M main
-git remote add origin https://github.com/<your-username>/ios-connect.git
-git push -u origin main
