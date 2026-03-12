@@ -1,0 +1,30 @@
+ios-connect/
+│
+├── core/                     
+│   ├── device_manager.py        # Detect iPhone/iPad
+│   ├── explorer_integrator.py   # Mount AFC, create folders
+│   ├── file_transfer.py         # Copy/move files
+│   └── utils.py                 # Logging, config, helpers
+│
+├── services/                 
+│   └── background_service.py    # Runs continuously, detects devices
+│
+├── integration/              
+│   └── libimobiledevice_wrapper.py # Python wrapper for libimobiledevice
+│
+├── ui/                       
+│   └── cli.py                   # Simple CLI for testing
+│
+├── tests/                    
+│   └── test_device_manager.py
+│
+└── main.py                      # Entry point
+
+
+cd ios-connect
+git init
+git add .
+git commit -m "Initial project structure with device detection"
+git branch -M main
+git remote add origin https://github.com/<your-username>/ios-connect.git
+git push -u origin main
