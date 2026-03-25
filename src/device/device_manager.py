@@ -1,3 +1,4 @@
+# device_manager.py
 from integration.libimobiledevice_wrapper import LibIMobileDeviceWrapper
 
 class DeviceManager:

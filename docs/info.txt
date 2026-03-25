@@ -1,22 +1,72 @@
-ios-connect/
+Project Name
+iOS Connect (working title)
+Goal
+Make iPhones behave like Android USB devices on Windows:
+- Show up under This PC with the phone icon and device name.
+- Expose photos, app data, backups, and diagnostics.
+- Full control over Explorer integration (not limited to DCIM).
+
+Architecture Overview
+- Integration Layer
+- libimobiledevice_wrapper.py: wraps binaries (idevice_id, ideviceinfo, etc.).
+- wpd_bridge.py: hooks into Windows Portable Devices (WPD) API to register custom device entry.
+- Core Layer
+- device_manager.py: detects devices, fetches info.
+- virtual_drive.py (optional if using drive letters).
+- photo_extractor.py: extracts DCIM photos.
+- Future: appdata_extractor.py, backup_manager.py.
+- Services Layer
+- background_service.py: runs continuously, detects devices, triggers integration.
+- UI Layer
+- Explorer integration (device node under This PC).
+- Auto‑open Explorer when device connects.
+
+Design Flow
+- Detection
+- Background service polls every 5 seconds.
+- Uses idevice_id to list devices.
+- Device Info
+- Fetch DeviceName via ideviceinfo.
+- Use this name as the label in Explorer.
+- Explorer Integration
+- Register custom device node under This PC.
+- Show phone icon + device name.
+- Content Exposure
+- DCIM → Photos.
+- AppData → WhatsApp, Telegram, etc.
+- Backups → Full device backups.
+- Diagnostics → Logs, crash reports.
+
+Future Extensions
+- Multi‑device support (multiple iPhones at once).
+- Sync/backup scheduling.
+- Optional encryption for extracted data.
+
+📂 Suggested Folder Structure
+ios_connect/
 │
-├── core/                     
-│   ├── device_manager.py        # Detect iPhone/iPad
-│   ├── explorer_integrator.py   # Mount AFC, create folders
-│   ├── file_transfer.py         # Copy/move files
-│   └── utils.py                 # Logging, config, helpers
+├── core/
+│   ├── device_manager.py
+│   ├── photo_extractor.py
+│   ├── virtual_drive.py   (optional if using drive letters)
+│   └── appdata_extractor.py (future)
 │
-├── services/                 
-│   └── background_service.py    # Runs continuously, detects devices
+├── integration/
+│   ├── libimobiledevice_wrapper.py
+│   └── wpd_bridge.py
 │
-├── integration/              
-│   └── libimobiledevice_wrapper.py # Python wrapper for libimobiledevice
+├── services/
+│   └── background_service.py
 │
-├── ui/                       
-│   └── cli.py                   # Simple CLI for testing
+├── ui/
+│   └── explorer_integration.md (docs for shell extension)
 │
-├── tests/                    
+├── tests/
 │   └── test_device_manager.py
 │
-└── main.py                      # Entry point
+├── main.py
+└── requirements.txt
+
+
+
 
