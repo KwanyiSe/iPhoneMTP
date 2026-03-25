@@ -1,191 +1,294 @@
+"""
+Low_level wrapper for libimobiledevice DLLs.
+Provides device detection, AFC, and file operations.
+"""
+
 import ctypes
-import subprocess
+import os
+from ctypes import (
+    c_void_p, c_char_p, c_int, c_uint32, c_uint8, c_uint64, c_char,
+    POINTER, byref, create_string_buffer
+)
+from typing import List, Optional
 
-class LibIMobileDeviceWrapper:
-    def __init__(self):
-        self.lib = ctypes.CDLL(r"C:\libimobiledevice\bin\libimobiledevice-1.0.dll")
 
-        class AFCClient(ctypes.Structure):
-            pass
-        self.AFCClient_p = ctypes.POINTER(AFCClient)
+class usbmuxd_device_info(ctypes.Structure):
+    _fields_ = [
+        ("handle", c_uint32),
+        ("product_id", c_uint32),
+        ("udid", c_char * 256),
+        ("conn_type", c_uint8),
+    ]
 
-        class HouseArrestClient(ctypes.Structure):
-            pass
-        self.HouseArrestClient_p = ctypes.POINTER(HouseArrestClient)
 
-        # Device + Lockdown
-        self.lib.idevice_new.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_char_p]
-        self.lib.idevice_new.restype = ctypes.c_int
+class iPhoneMTPWrapper:
+    def __init__(self, dll_dir: Optional[str] = None):
+        self._dll_dir = dll_dir
+        self._libusbmuxd = None
+        self._libimobiledevice = None
+        self._libplist = None
+        self._libc = None
+        self._load_dlls()
+        self._define_functions()
 
-        self.lib.lockdownd_client_new_with_handshake.argtypes = [
-            ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.c_char_p
+    # =========================
+    # DLL LOADING
+    # =========================
+    def _load_dlls(self):
+        if self._dll_dir:
+            dll_dir = os.path.abspath(self._dll_dir)
+            os.add_dll_directory(dll_dir)
+            libusbmuxd_path = os.path.join(dll_dir, "libusbmuxd-2.0.dll")
+            libimobiledevice_path = os.path.join(dll_dir, "libimobiledevice-1.0.dll")
+            libplist_path = os.path.join(dll_dir, "libplist-2.0.dll")
+        else:
+            libusbmuxd_path = "libusbmuxd-2.0.dll"
+            libimobiledevice_path = "libimobiledevice-1.0.dll"
+            libplist_path = "libplist-2.0.dll"
+
+        self._libusbmuxd = ctypes.CDLL(libusbmuxd_path)
+        self._libimobiledevice = ctypes.CDLL(libimobiledevice_path)
+        self._libplist = ctypes.CDLL(libplist_path)
+        self._libc = ctypes.CDLL("msvcrt.dll")  # C runtime for free() (currently unused)
+
+    def _define_functions(self):
+        # libusbmuxd
+        self._libusbmuxd.usbmuxd_get_device_list.argtypes = [
+            POINTER(POINTER(usbmuxd_device_info)), c_int
         ]
-        self.lib.lockdownd_client_new_with_handshake.restype = ctypes.c_int
+        self._libusbmuxd.usbmuxd_get_device_list.restype = c_int
+        self._libusbmuxd.usbmuxd_device_list_free.argtypes = [
+            POINTER(usbmuxd_device_info)
+        ]
+        self._libusbmuxd.usbmuxd_device_list_free.restype = None
+
+        # libimobiledevice (device & lockdown)
+        self._libimobiledevice.idevice_new.argtypes = [
+            POINTER(c_void_p), c_char_p
+        ]
+        self._libimobiledevice.idevice_new.restype = c_int
+        self._libimobiledevice.idevice_free.argtypes = [c_void_p]
+        self._libimobiledevice.idevice_free.restype = None
+
+        self._libimobiledevice.lockdownd_client_new_with_handshake.argtypes = [
+            c_void_p, POINTER(c_void_p), c_char_p
+        ]
+        self._libimobiledevice.lockdownd_client_new_with_handshake.restype = c_int
+        self._libimobiledevice.lockdownd_client_free.argtypes = [c_void_p]
+        self._libimobiledevice.lockdownd_client_free.restype = None
+
+        self._libimobiledevice.lockdownd_get_value.argtypes = [
+            c_void_p, c_char_p, c_char_p, POINTER(c_void_p)
+        ]
+        self._libimobiledevice.lockdownd_get_value.restype = c_int
 
         # AFC
-        self.lib.afc_client_start_service.argtypes = [
-            ctypes.c_void_p, ctypes.POINTER(self.AFCClient_p), ctypes.c_char_p
+        self._libimobiledevice.afc_client_start_service.argtypes = [
+            c_void_p, POINTER(c_void_p), c_char_p
         ]
-        self.lib.afc_client_start_service.restype = ctypes.c_int
+        self._libimobiledevice.afc_client_start_service.restype = c_int
+        self._libimobiledevice.afc_client_free.argtypes = [c_void_p]
+        self._libimobiledevice.afc_client_free.restype = c_int
 
-        self.lib.afc_read_directory.argtypes = [
-            self.AFCClient_p, ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_char_p))
+        self._libimobiledevice.afc_read_directory.argtypes = [
+            c_void_p, c_char_p, POINTER(POINTER(c_char_p))
         ]
-        self.lib.afc_read_directory.restype = ctypes.c_int
+        self._libimobiledevice.afc_read_directory.restype = c_int
 
-        # File operations
-        self.lib.afc_file_open.argtypes = [self.AFCClient_p, ctypes.c_char_p, ctypes.c_uint64, ctypes.POINTER(ctypes.c_uint64)]
-        self.lib.afc_file_open.restype = ctypes.c_int
-
-        self.lib.afc_file_read.argtypes = [self.AFCClient_p, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
-        self.lib.afc_file_read.restype = ctypes.c_int
-
-        self.lib.afc_file_write.argtypes = [self.AFCClient_p, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
-        self.lib.afc_file_write.restype = ctypes.c_int
-
-        self.lib.afc_file_close.argtypes = [self.AFCClient_p, ctypes.c_uint64]
-        self.lib.afc_file_close.restype = ctypes.c_int
-
-        self.lib.afc_make_directory.argtypes = [self.AFCClient_p, ctypes.c_char_p]
-        self.lib.afc_make_directory.restype = ctypes.c_int
-
-        self.lib.afc_remove_path.argtypes = [self.AFCClient_p, ctypes.c_char_p]
-        self.lib.afc_remove_path.restype = ctypes.c_int
-
-        # House Arrest
-        self.lib.house_arrest_client_start_service.argtypes = [
-            ctypes.c_void_p, ctypes.POINTER(self.HouseArrestClient_p), ctypes.c_char_p
+        self._libimobiledevice.afc_file_open.argtypes = [
+            c_void_p, c_char_p, c_uint32, POINTER(c_uint64)
         ]
-        self.lib.house_arrest_client_start_service.restype = ctypes.c_int
+        self._libimobiledevice.afc_file_open.restype = c_int
 
-        self.lib.house_arrest_send_command.argtypes = [self.HouseArrestClient_p, ctypes.c_char_p]
-        self.lib.house_arrest_send_command.restype = ctypes.c_int
-
-        self.lib.house_arrest_get_result.argtypes = [self.HouseArrestClient_p]
-        self.lib.house_arrest_get_result.restype = ctypes.c_int
-
-        self.lib.afc_client_new_from_house_arrest_client.argtypes = [
-            self.HouseArrestClient_p, ctypes.POINTER(self.AFCClient_p)
+        self._libimobiledevice.afc_file_read.argtypes = [
+            c_void_p, c_uint64, c_void_p, c_uint32, POINTER(c_uint32)
         ]
-        self.lib.afc_client_new_from_house_arrest_client.restype = ctypes.c_int
+        self._libimobiledevice.afc_file_read.restype = c_int
 
-        self.afc_client = None
+        self._libimobiledevice.afc_file_write.argtypes = [
+            c_void_p, c_uint64, c_void_p, c_uint32, POINTER(c_uint32)
+        ]
+        self._libimobiledevice.afc_file_write.restype = c_int
 
-    @staticmethod
-    def list_devices():
-        result = subprocess.run([r"C:\libimobiledevice\bin\idevice_id.exe", "-l"],
-                                capture_output=True, text=True)
-        return result.stdout.strip().split("\n") if result.stdout else []
+        self._libimobiledevice.afc_file_close.argtypes = [
+            c_void_p, c_uint64
+        ]
+        self._libimobiledevice.afc_file_close.restype = c_int
 
-    def connect_afc(self, udid: str):
-        device = ctypes.c_void_p()
-        if self.lib.idevice_new(ctypes.byref(device), udid.encode("utf-8")) != 0:
-            raise RuntimeError("Failed to connect to device")
+        self._libimobiledevice.afc_make_directory.argtypes = [
+            c_void_p, c_char_p
+        ]
+        self._libimobiledevice.afc_make_directory.restype = c_int
 
-        lockdown = ctypes.c_void_p()
-        if self.lib.lockdownd_client_new_with_handshake(device, ctypes.byref(lockdown), None) != 0:
-            raise RuntimeError("Failed to start lockdownd")
+        self._libimobiledevice.afc_remove_path.argtypes = [
+            c_void_p, c_char_p
+        ]
+        self._libimobiledevice.afc_remove_path.restype = c_int
 
-        afc_client = self.AFCClient_p()
-        if self.lib.afc_client_start_service(device, ctypes.byref(afc_client), None) != 0:
-            raise RuntimeError("Failed to start AFC client service")
+        # libplist
+        self._libplist.plist_get_string_val.argtypes = [
+            c_void_p, POINTER(c_char_p)
+        ]
+        self._libplist.plist_get_string_val.restype = None
+        self._libplist.plist_free.argtypes = [c_void_p]
+        self._libplist.plist_free.restype = None
 
-        self.afc_client = afc_client
+        # C runtime
+        self._libc.free.argtypes = [c_void_p]
+        self._libc.free.restype = None
 
-    def list_afc_root(self):
-        return self.list_folder(self.afc_client, "")
-
-    def list_folder(self, afc_client, path: str):
-        dirlist = ctypes.POINTER(ctypes.c_char_p)()
-        res = self.lib.afc_read_directory(afc_client, path.encode("utf-8"), ctypes.byref(dirlist))
-        if res != 0:
+    # =========================
+    # DEVICE DETECTION
+    # =========================
+    def list_devices(self) -> List[str]:
+        device_list = POINTER(usbmuxd_device_info)()
+        count = self._libusbmuxd.usbmuxd_get_device_list(byref(device_list), 0)
+        if count < 0:
             return []
-        entries = []
+
+        udids = []
+        for i in range(count):
+            dev = device_list[i]
+            raw = bytes(dev.udid)
+            udid_bytes = raw.split(b'\x00', 1)[0]
+            udid = udid_bytes.decode('utf-8')
+            if udid:
+                udids.append(udid)
+
+        # TODO: usbmuxd_device_list_free causes hang – disabled for now
+        # self._libusbmuxd.usbmuxd_device_list_free(device_list)
+        return udids
+
+    def get_device_name(self, udid: str) -> Optional[str]:
+        return self.get_device_property(udid, "DeviceName")
+
+    def get_device_property(self, udid: str, key: str) -> Optional[str]:
+        """Retrieve any device property via lockdown (e.g., 'ProductVersion', 'SerialNumber')."""
+        device = c_void_p()
+        if self._libimobiledevice.idevice_new(byref(device), udid.encode()) != 0:
+            return None
+
+        lockdown = c_void_p()
+        if self._libimobiledevice.lockdownd_client_new_with_handshake(
+            device, byref(lockdown), b"iPhoneMTP"
+        ) != 0:
+            self._libimobiledevice.idevice_free(device)
+            return None
+
+        value = c_void_p()
+        if self._libimobiledevice.lockdownd_get_value(
+            lockdown, None, key.encode(), byref(value)
+        ) != 0:
+            self._libimobiledevice.lockdownd_client_free(lockdown)
+            self._libimobiledevice.idevice_free(device)
+            return None
+
+        result = self._plist_to_string(value)
+        self._libplist.plist_free(value)
+        self._libimobiledevice.lockdownd_client_free(lockdown)
+        self._libimobiledevice.idevice_free(device)
+        return result
+
+    def _plist_to_string(self, plist) -> Optional[str]:
+        if not plist:
+            return None
+        s = c_char_p()
+        self._libplist.plist_get_string_val(plist, byref(s))
+        if s.value:
+            result = s.value.decode('utf-8')
+            # TODO: free allocated string – disabled because free() from msvcrt causes hang
+            # self._libc.free(s.value)
+            return result
+        return None
+
+    # =========================
+    # AFC (SYSTEM FOLDERS)
+    # =========================
+    def connect_afc(self, udid: str):
+        device = c_void_p()
+        if self._libimobiledevice.idevice_new(byref(device), udid.encode()) != 0:
+            return None
+
+        afc = c_void_p()
+        if self._libimobiledevice.afc_client_start_service(
+            device, byref(afc), b"iPhoneMTP"
+        ) != 0:
+            self._libimobiledevice.idevice_free(device)
+            return None
+
+        # Store device handle for later cleanup (optional)
+        self._afc_device = device
+        return afc
+
+    def afc_list_dir(self, afc, path: str = "/"):
+        file_list = POINTER(c_char_p)()
+        if self._libimobiledevice.afc_read_directory(
+            afc, path.encode(), byref(file_list)
+        ) != 0:
+            return []
+
+        files = []
         i = 0
-        while dirlist[i]:
-            entries.append(dirlist[i].decode("utf-8"))
+        while file_list[i]:
+            name = file_list[i].decode('utf-8')
+            if name not in (".", ".."):
+                files.append(name)
             i += 1
-        return entries
+        # TODO: free file_list (memory leak)
+        return files
 
-    def connect_house_arrest(self, udid: str, app_id: str):
-        device = ctypes.c_void_p()
-        if self.lib.idevice_new(ctypes.byref(device), udid.encode("utf-8")) != 0:
-            return None
+    def afc_download_file(self, afc, remote_path: str, local_path: str) -> bool:
+        FILE_OPEN_READ = 0x00000001
+        handle = c_uint64()
+        if self._libimobiledevice.afc_file_open(
+            afc, remote_path.encode(), FILE_OPEN_READ, byref(handle)
+        ) != 0:
+            return False
 
-        ha_client = self.HouseArrestClient_p()
-        res = self.lib.house_arrest_client_start_service(device, ctypes.byref(ha_client), app_id.encode("utf-8"))
-        if res != 0 or not ha_client:
-            print(f"House Arrest service failed for {app_id}, code={res}")
-            return None
+        local_dir = os.path.dirname(local_path)
+        if local_dir and not os.path.exists(local_dir):
+            os.makedirs(local_dir, exist_ok=True)
 
-        res = self.lib.house_arrest_send_command(ha_client, b"VendDocuments")
-        if res != 0:
-            print(f"House Arrest send_command failed for {app_id}, code={res}")
-            return None
+        with open(local_path, 'wb') as f:
+            buffer = create_string_buffer(64 * 1024)
+            while True:
+                bytes_read = c_uint32(0)
+                if self._libimobiledevice.afc_file_read(
+                    afc, handle.value, buffer, len(buffer), byref(bytes_read)
+                ) != 0 or bytes_read.value == 0:
+                    break
+                f.write(buffer.raw[:bytes_read.value])
 
-        if self.lib.house_arrest_get_result(ha_client) != 0:
-            return None
+        self._libimobiledevice.afc_file_close(afc, handle.value)
+        return True
 
-        afc_client = self.AFCClient_p()
-        if self.lib.afc_client_new_from_house_arrest_client(ha_client, ctypes.byref(afc_client)) != 0:
-            return None
+    def afc_upload_file(self, afc, local_path: str, remote_path: str) -> bool:
+        if not os.path.exists(local_path):
+            return False
 
-        return afc_client
+        FILE_OPEN_WRITE = 0x00000002
+        handle = c_uint64()
+        if self._libimobiledevice.afc_file_open(
+            afc, remote_path.encode(), FILE_OPEN_WRITE, byref(handle)
+        ) != 0:
+            return False
 
-    def is_file_sharing_app(self, afc_client):
-        dirlist = ctypes.POINTER(ctypes.c_char_p)()
-        res = self.lib.afc_read_directory(afc_client, b"Documents", ctypes.byref(dirlist))
-        return res == 0
+        with open(local_path, 'rb') as f:
+            buffer = f.read(64 * 1024)
+            while buffer:
+                bytes_written = c_uint32(0)
+                if self._libimobiledevice.afc_file_write(
+                    afc, handle.value, buffer, len(buffer), byref(bytes_written)
+                ) != 0 or bytes_written.value != len(buffer):
+                    self._libimobiledevice.afc_file_close(afc, handle.value)
+                    return False
+                buffer = f.read(64 * 1024)
 
-    @staticmethod
-    def list_installed_apps():
-        result = subprocess.run(["ideviceinstaller", "-l", "-o", "list_user"],
-                                capture_output=True, text=True)
-        apps = []
-        for line in result.stdout.splitlines():
-            if line.strip() and not line.startswith("CFBundleIdentifier"):
-                parts = line.split(",")
-                if len(parts) >= 3:
-                    bundle_id = parts[0].strip()
-                    name = parts[2].strip().strip('"')
-                    apps.append({"bundle_id": bundle_id, "name": name})
-        return apps
+        self._libimobiledevice.afc_file_close(afc, handle.value)
+        return True
 
-    # --- New File Operations ---
-    def read_file(self, afc_client, path: str) -> bytes:
-        handle = ctypes.c_uint64()
-        if self.lib.afc_file_open(afc_client, path.encode("utf-8"), 1, ctypes.byref(handle)) != 0:
-            raise RuntimeError("Failed to open file for reading")
+    def afc_delete(self, afc, path: str) -> bool:
+        return self._libimobiledevice.afc_remove_path(afc, path.encode()) == 0
 
-        buf = ctypes.create_string_buffer(4096)
-        data = b""
-        read_bytes = ctypes.c_uint32()
-
-        while True:
-            res = self.lib.afc_file_read(afc_client, handle, buf, len(buf), ctypes.byref(read_bytes))
-            if res != 0 or read_bytes.value == 0:
-                break
-            data += buf.raw[:read_bytes.value]
-
-        self.lib.afc_file_close(afc_client, handle)
-        return data
-
-    def write_file(self, afc_client, path: str, content: bytes):
-        handle = ctypes.c_uint64()
-        if self.lib.afc_file_open(afc_client, path.encode("utf-8"), 2, ctypes.byref(handle)) != 0:
-            raise RuntimeError("Failed to open file for writing")
-
-        written = ctypes.c_uint32()
-        res = self.lib.afc_file_write(afc_client, handle, content, len(content), ctypes.byref(written))
-        if res != 0 or written.value != len(content):
-            raise RuntimeError("Failed to write file")
-
-        self.lib.afc_file_close(afc_client, handle)
-
-    def create_folder(self, afc_client, path: str):
-        if self.lib.afc_make_directory(afc_client, path.encode("utf-8")) != 0:
-            raise RuntimeError("Failed to create folder")
-
-    def delete_path(self, afc_client, path: str):
-        if self.lib.afc_remove_path(afc_client, path.encode("utf-8")) != 0:
-            raise RuntimeError("Failed to delete path")
+    def afc_mkdir(self, afc, path: str) -> bool:
+        return self._libimobiledevice.afc_make_directory(afc, path.encode()) == 0

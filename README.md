@@ -24,6 +24,7 @@ Plug & play – no separate app to open.
 - `src/service/` – Windows Service
 - `src/utils/` – helpers, registry, logging
 - `tests/` – test scripts
+- `resources/`
 
 ## License
 MIT
