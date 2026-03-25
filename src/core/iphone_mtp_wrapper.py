@@ -1,6 +1,8 @@
+
 """
 Low_level wrapper for libimobiledevice DLLs.
 Provides device detection, AFC, and file operations.
+
 """
 
 import ctypes
