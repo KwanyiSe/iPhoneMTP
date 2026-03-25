@@ -1,27 +1,41 @@
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.env
-
-# Virtual environments
-venv/
+*.py[cod]
+*$py.class
+*.so
+.Python
 env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+.tox
+.mypy_cache/
+*.egg-info/
+dist/
+build/
 
-# IDE files
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Logs
+# Project specific
+libs/*.dll
 *.log
+*.tmp
+*.pid
+*.reg
+*.exe
+*.msi
+*.ico
 
-# Backups
-ios_mount/
-backups/
+# Ignore compiled Python files
+*.pyc
 
-docs/
+# Ignore environment files
+.env
